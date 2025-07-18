@@ -1,0 +1,5 @@
+barcode	path
+ACGCGACGGCTATACCGAAGCGCCTATA	./Data/methylation_data.h5
+ACTTCTGCCATCGATGATACGTATGGCA	./Data/methylation_data.h5
+ACTTCTGCCAGTACCTGAATCTGATGCT	./Data/methylation_data.h5
+TTCATATCAACTACTGCAAGATCTGAAT	./Data/methylation_data.h5
