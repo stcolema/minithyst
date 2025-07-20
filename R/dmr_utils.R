@@ -315,14 +315,7 @@ print.dmr_config <- function(x, ...) {
   cat("Created:", format(x$created, "%Y-%m-%d %H:%M:%S"), "\n")
 }
 
-#' Run complete DMR analysis pipeline
-#' 
-#' @param h5_paths data.table with barcode and path columns
-#' @param metadata data.table with cell metadata
-#' @param config DMR configuration from configure_dmr_analysis
-#' @param output_dir Directory for output files
-#' @param threads Number of threads to use
-#' @return List with all results
+# Run complete DMR analysis pipeline
 run_dmr_pipeline <- function(h5_paths, 
                              metadata,
                              config,
@@ -335,6 +328,11 @@ run_dmr_pipeline <- function(h5_paths,
   # Log start
   message(sprintf("Starting DMR analysis: %s", Sys.time()))
   message(sprintf("Cells: %d, Threads: %d", nrow(h5_paths), threads))
+  
+  # Validate inputs
+  if (!all(metadata$cell_id %in% h5_paths$barcode)) {
+    stop("Not all cells in metadata are present in h5_paths")
+  }
   
   # Step 1: Index chromosomes
   message("Step 1: Indexing chromosomes...")
@@ -389,31 +387,36 @@ run_dmr_pipeline <- function(h5_paths,
   # Save results
   fwrite(dmr_filtered, file.path(output_dir, "dmr_filtered.tsv"), sep = "\t")
   
-  # Step 5: Collapse DMRs
-  message("Step 5: Collapsing adjacent DMRs...")
-  dmr_collapsed <- collapse_dmr(
-    dmr_filtered = dmr_filtered,
-    max_gap = config$window_size * 4,
-    min_length = config$window_size * 4
-  )
-  
-  # Save results
-  fwrite(dmr_collapsed, file.path(output_dir, "dmr_collapsed.tsv"), sep = "\t")
+  # Step 5: Collapse DMRs (only if we have results)
+  if (nrow(dmr_filtered) > 0) {
+    message("Step 5: Collapsing adjacent DMRs...")
+    dmr_collapsed <- collapse_dmr(
+      dmr_filtered = dmr_filtered,
+      max_gap = config$window_size * 4,
+      min_length = config$window_size * 4
+    )
+    
+    # Save results
+    fwrite(dmr_collapsed, file.path(output_dir, "dmr_collapsed.tsv"), sep = "\t")
+    
+    # Export BED files
+    export_dmr_bed(
+      dmr_results = dmr_collapsed,
+      output_file = file.path(output_dir, "dmrs.bed"),
+      track_name = paste(config$context, "DMRs"),
+      separate_by = "direction"
+    )
+  } else {
+    message("No significant DMRs found after filtering")
+    dmr_collapsed <- NULL
+  }
   
   # Step 6: Generate summary
   message("Step 6: Generating summary...")
-  summary_stats <- summarize_dmr(dmr_collapsed)
+  summary_stats <- summarize_dmr(dmr_filtered)
   
   # Save summary
   saveRDS(summary_stats, file.path(output_dir, "dmr_summary.rds"))
-  
-  # Export BED files
-  export_dmr_bed(
-    dmr_results = dmr_collapsed,
-    output_file = file.path(output_dir, "dmrs.bed"),
-    track_name = paste(config$context, "DMRs"),
-    separate_by = "direction"
-  )
   
   message(sprintf("DMR analysis complete: %s", Sys.time()))
   message(sprintf("Results saved to: %s", output_dir))
@@ -428,4 +431,79 @@ run_dmr_pipeline <- function(h5_paths,
     dmr_collapsed = dmr_collapsed,
     summary = summary_stats
   )
+}
+
+#' Diagnose DMR analysis issues
+#' 
+#' @param h5_path Path to H5 file
+#' @param barcode Barcode to test
+#' @param context Methylation context
+#' @return List with diagnostic information
+diagnose_dmr_data <- function(h5_path, barcode, context = "CG") {
+  
+  cat("=== DMR Data Diagnostics ===\n")
+  
+  # Check file exists
+  if (!file.exists(h5_path)) {
+    stop("H5 file not found: ", h5_path)
+  }
+  
+  # Check structure
+  h5_contents <- h5ls(h5_path)
+  cat("\nH5 file structure:\n")
+  print(table(h5_contents$group))
+  
+  # Try to read data
+  data_path <- paste0(context, "/", barcode, "/1")
+  
+  tryCatch({
+    # Read first 100 rows
+    test_data <- h5read(h5_path, data_path, index = list(1:100, NULL))
+    
+    cat("\nData preview:\n")
+    print(head(test_data))
+    
+    cat("\nData dimensions:", dim(test_data), "\n")
+    cat("Column names:", names(test_data), "\n")
+    cat("Data class:", class(test_data), "\n")
+    
+    # Check data types
+    cat("\nColumn types:\n")
+    print(sapply(test_data, class))
+    
+    # Check for required columns
+    required <- c("chr", "pos", "c", "t")
+    missing <- setdiff(required, names(test_data))
+    if (length(missing) > 0) {
+      cat("\nWARNING: Missing required columns:", paste(missing, collapse = ", "), "\n")
+    }
+    
+    # Check chromosomes
+    if ("chr" %in% names(test_data)) {
+      cat("\nChromosomes found:", paste(unique(test_data$chr), collapse = ", "), "\n")
+    }
+    
+    # Check coverage
+    if (all(c("c", "t") %in% names(test_data))) {
+      coverage <- test_data$c + test_data$t
+      cat("\nCoverage statistics:\n")
+      cat("  Mean:", mean(coverage), "\n")
+      cat("  Median:", median(coverage), "\n")
+      cat("  Range:", paste(range(coverage), collapse = "-"), "\n")
+    }
+    
+    return(list(
+      success = TRUE,
+      data = test_data,
+      structure = h5_contents
+    ))
+    
+  }, error = function(e) {
+    cat("\nERROR reading data:", e$message, "\n")
+    return(list(
+      success = FALSE,
+      error = e$message,
+      structure = h5_contents
+    ))
+  })
 }

@@ -2,8 +2,8 @@
 # example_dmr_analysis.R - Example of running simplified DMR analysis
 
 # Load required functions
-source("dmr_analysis.R")
-source("dmr_utils.R")
+source("./R/dmr_analysis.R")
+source("./R/dmr_utils.R")
 
 # Set up paths and metadata
 # These files are created by generate_toy_data.R
