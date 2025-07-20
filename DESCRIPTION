@@ -1,11 +1,33 @@
 Package: minithyst
-Title: minithyst: a miniture amethyst for DMR analysis
-Version: 0.0.0.9000
+Title: Miniature Amethyst for DMR Analysis from Single-Cell Methylation Data
+Version: 0.1.0
 Authors@R: 
-    person("First", "Last", , "first.last@example.com", role = c("aut", "cre"))
-Description: Stripped down version of amethyst reducing to only DMR analysis.
-License: `use_mit_license()`, `use_gpl3_license()` or friends to pick a
-    license
+    person("Stephen", "Coleman", , "colemste@ohsu.edu", role = c("aut", "cre"))
+Description: A streamlined implementation of differential methylated region (DMR) 
+    analysis from the amethyst package. Provides focused functionality for DMR 
+    detection from single-cell methylation data with minimal dependencies.
+    Implements efficient algorithms for indexing H5 files, calculating smoothed
+    methylation windows, and statistical testing for differential methylation.
+License: MIT + file LICENSE
 Encoding: UTF-8
+LazyData: true
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
+Depends: 
+    R (>= 4.0.0)
+Imports:
+    data.table (>= 1.14.0),
+    rhdf5,
+    GenomicRanges,
+    IRanges,
+    stats,
+    methods,
+    utils
+Suggests:
+    rtracklayer,
+    testthat (>= 3.0.0),
+    knitr,
+    rmarkdown
+VignetteBuilder: knitr
+URL: https://github.com/stcolema/minithyst
+BugReports: https://github.com/stcolema/minithyst/issues
