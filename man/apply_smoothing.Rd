@@ -9,3 +9,4 @@ apply_smoothing(count_matrix, smooth, step)
 \description{
 Apply smoothing to count matrix
 }
+\keyword{internal}

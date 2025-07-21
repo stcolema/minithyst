@@ -2,10 +2,304 @@
 % Please edit documentation in R/dmr_analysis.R
 \name{get_chromosome_sizes}
 \alias{get_chromosome_sizes}
-\title{Get chromosome sizes for a genome}
+\title{#' @import data.table
+#' @import GenomicRanges
+#' @importFrom rhdf5 h5read h5ls H5Fopen H5Dopen H5Dget_space H5Sget_simple_extent_dims H5Dget_type H5Tget_class h5closeAll
+#' @importFrom IRanges IRanges
+#' @importFrom stats phyper dhyper p.adjust
+NULL}
 \usage{
+get_chromosome_sizes(genome)
+
 get_chromosome_sizes(genome)
 }
 \description{
+#' @import data.table
+#' @import GenomicRanges
+#' @importFrom rhdf5 h5read h5ls H5Fopen H5Dopen H5Dget_space H5Sget_simple_extent_dims H5Dget_type H5Tget_class h5closeAll
+#' @importFrom IRanges IRanges
+#' @importFrom stats phyper dhyper p.adjust
+NULL
+
 Get chromosome sizes for a genome
 }
+\section{Set data.table threads explicitly to avoid conflicts}{
+data.table::setDTthreads(1) # Will be configured by user
+}
+
+\section{Configure threading}{
+old_threads <- data.table::getDTthreads()
+data.table::setDTthreads(threads)
+on.exit(data.table::setDTthreads(old_threads))
+}
+
+\section{Process each file}{
+all_indices <- data.table::rbindlist(lapply(seq_len(nrow(h5_paths)), function(i) {
+path <- h5_paths$path\link{i}
+barcode <- h5_paths$barcode\link{i}
+
+\if{html}{\out{<div class="sourceCode">}}\preformatted{tryCatch(
+  \{
+    # Build the data path
+    data_path <- paste0(type, "/", barcode, "/1")
+
+    # Read the full dataset (1D compound array)
+    h5_data <- rhdf5::h5read(path, name = data_path)
+
+    # Convert to data.table if needed
+    if (!data.table::is.data.table(h5_data)) \{
+      h5_data <- data.table::as.data.table(h5_data)
+    \}
+
+    # Get unique chromosomes and their positions
+    chr_summary <- h5_data[, .(
+      cell_id = barcode,
+      first_pos = min(.I),
+      last_pos = max(.I),
+      n_sites = .N
+    ), by = chr]
+
+    # Filter chromosomes if list provided
+    if (!is.null(chr_list)) \{
+      chr_summary <- chr_summary[chr \%in\% chr_list]
+    \} else \{
+      # Remove alternative contigs by default
+      chr_summary <- chr_summary[!grepl("_|EBV|M", chr)]
+    \}
+
+    return(chr_summary)
+  \},
+  error = function(e) \{
+    warning(sprintf("Error indexing barcode \%s: \%s", barcode, e$message))
+    return(NULL)
+  \}
+)
+}\if{html}{\out{</div>}}
+
+}))
+}
+
+\section{Split by chromosome}{
+if (nrow(all_indices) > 0) {
+chr_index <- split(all_indices, all_indices$chr)
+} else {
+chr_index <- list()
+}
+
+return(chr_index)
+}
+
+#' Calculate smoothed methylation windows
+#'
+#' @param h5_paths data.table with columns: barcode, path
+#' @param chr_index List of chromosome indices from index_chromosomes
+#' @param metadata data.table with cell metadata, must have grouping column
+#' @param type Character, methylation context ("CG" or "CH")
+#' @param step Integer, window step size in bp (default: 500)
+#' @param smooth Integer, kernel size for smoothing adjacent windows (default: 3)
+#' @param group_by Character, column name in metadata for grouping (default: "cluster_id")
+#' @param genome Character, genome build for chromosome sizes (default: "hg38")
+#' @param threads Integer, number of threads (default: 1)
+#' @param parallel_strategy Character, either "chromosomes" or "groups" (default: "auto")
+#' @return List with sum_matrix and/or pct_matrix
+#' @export
+calc_smoothed_windows <- function(h5_paths,
+chr_index,
+metadata,
+type = "CG",
+step = 500,
+smooth = 3,
+group_by = "cluster_id",
+genome = "hg38",
+threads = 1,
+parallel_strategy = "auto",
+return_sum_matrix = TRUE,
+return_pct_matrix = TRUE) {
+}
+
+\section{Input validation}{
+h5_paths <- data.table::as.data.table(h5_paths)
+metadata <- data.table::as.data.table(metadata)
+
+if (!all(c("barcode", "path") \%in\% names(h5_paths))) {
+stop("h5_paths must contain 'barcode' and 'path' columns")
+}
+}
+
+\section{Prepare groups}{
+if (!"cell_id" \%in\% names(metadata)) {
+metadata\link{, cell_id := rownames(metadata)}
+}
+groups <- unique(metadata[\link{group_by}])
+groups <- groups\link{!is.na(groups)}
+n_groups <- length(groups)
+n_chr <- length(chr_index)
+}
+
+\section{CRITICAL FIX 1: Choose parallelization strategy intelligently}{
+if (parallel_strategy == "auto") {
+# Use groups if we have few chromosomes but many groups
+# Use chromosomes if we have many chromosomes but few groups
+parallel_strategy <- ifelse(n_groups > n_chr * 2, "groups", "chromosomes")
+}
+}
+
+\section{CRITICAL FIX 2: Configure threading properly}{
+old_dt_threads <- data.table::getDTthreads()
+on.exit(data.table::setDTthreads(old_dt_threads))
+
+if (threads == 1) {
+# Single threaded - keep everything sequential
+data.table::setDTthreads(1)
+} else if (parallel_strategy == "groups") {
+# Parallelize across groups, let data.table work single-threaded
+data.table::setDTthreads(1)
+future::plan(future::multisession, workers = threads)
+on.exit(future::plan(future::sequential), add = TRUE)
+} else {
+# Parallelize across chromosomes, give remaining threads to data.table
+dt_threads <- max(1, ceiling(threads / n_chr))
+data.table::setDTthreads(dt_threads)
+}
+}
+
+\section{Generate genomic windows}{
+genomechunks <- generate_genomic_windows(genome, step)
+genomechunks
+data.table::setkey(genomechunks, chr, start, end)
+}
+
+\section{CRITICAL FIX 3: Efficient processing function}{
+process_group_for_chromosome <- function(gr, chr, sites, h5_paths, metadata) {
+# Get cells in this group
+member_cells <- metadata\link{get(group_by) == gr, cell_id}
+if (length(member_cells) == 0) return(NULL)
+
+\if{html}{\out{<div class="sourceCode">}}\preformatted{# Read all data for this group-chromosome combination at once
+group_data_list <- lapply(member_cells, function(cell_id) \{
+  # Match cell to h5 path
+  path_row <- h5_paths[barcode == cell_id]
+  if (nrow(path_row) == 0) return(NULL)
+  
+  # Get sites for this cell
+  cell_sites <- sites[cell_id == cell_id]
+  if (nrow(cell_sites) == 0) return(NULL)
+  
+  tryCatch(\{
+    # Read H5 data
+    data <- data.table::data.table(
+      rhdf5::h5read(path_row$path[1], 
+                    name = paste0(type, "/", cell_id, "/1"),
+                    start = cell_sites$start,
+                    count = cell_sites$count)
+    )
+    data[, cell_id := cell_id]
+    return(data)
+  \}, error = function(e) NULL)
+\})
+
+# Combine all cell data for this group
+group_data <- data.table::rbindlist(group_data_list, fill = TRUE)
+if (is.null(group_data) || nrow(group_data) == 0) return(NULL)
+
+# Window assignment
+group_data[pos \%\% step == 0, pos := pos + 1L]
+group_data[, window := paste0(chr, "_", 
+                              round_any(pos, step, floor), "_",
+                              round_any(pos, step, ceiling))]
+
+# Aggregate - this uses data.table's optimized grouping
+result <- group_data[, .(c = sum(c, na.rm = TRUE), 
+                         t = sum(t, na.rm = TRUE)), 
+                     by = window]
+
+data.table::setnames(result, c("window", paste0(gr, "_c"), paste0(gr, "_t")))
+return(result)
+}\if{html}{\out{</div>}}
+
+}
+}
+
+\section{CRITICAL FIX 4: Process based on chosen strategy}{
+
+}
+
+\section{CRITICAL FIX 5: Ensure we use dplyr for compatibility}{
+if (requireNamespace("dplyr", quietly = TRUE)) {
+genomechunks_df <- as.data.frame(genomechunks)
+count_matrix_df <- as.data.frame(count_matrix)
+count_matrix <- dplyr::left_join(genomechunks_df, count_matrix_df, by = "window")
+count_matrix <- data.table::as.data.table(count_matrix)
+} else {
+# Fallback to data.table merge
+count_matrix <- genomechunks\link{count_matrix, on = "window"}
+}
+}
+
+\section{Apply smoothing (rest remains the same)}{
+apply_smoothing(count_matrix, smooth, groups)
+}
+
+#' Helper to generate genomic windows
+#' @keywords internal
+generate_genomic_windows <- function(genome, step) {
+genome_info <- get_genome_info(genome)
+
+window_list <- lapply(seq_along(genome_info$chromosomes), function(i) {
+chr <- genome_info$chromosomes\link{i}
+size <- genome_info$sizes\link{i}
+starts <- seq(0, size - 1, by = step)
+ends <- pmin(starts + step, size)
+data.table::data.table(chr = chr, start = starts, end = ends)
+})
+
+data.table::rbindlist(window_list)
+}
+
+#' Apply smoothing to count matrix
+#' @keywords internal
+apply_smoothing <- function(count_matrix, smooth, groups) {
+count_matrix\link{, window := NULL}
+data.table::setorder(count_matrix, chr, start)
+}
+
+\section{Get count columns}{
+
+}
+
+\section{Get member cells}{
+member_cells <- rownames(membership\link{membership$membership == gr, , drop = FALSE})
+
+if (length(member_cells) == 0) {
+return(data.table(window = character(0), c = integer(0), t = integer(0)))
+}
+}
+
+\section{Handle prefix if present}{
+if ("prefix" \%in\% names(h5_paths)) {
+h5_paths$cell_id <- paste0(h5_paths$prefix, h5_paths$barcode)
+member_indices <- match(member_cells, h5_paths$cell_id)
+} else {
+member_indices <- match(member_cells, h5_paths$barcode)
+}
+
+valid_indices <- !is.na(member_indices)
+
+if (!any(valid_indices)) {
+return(data.table(window = character(0), c = integer(0), t = integer(0)))
+}
+
+member_paths <- h5_paths$path[member_indices\link{valid_indices}]
+member_barcodes <- h5_paths$barcode[member_indices\link{valid_indices}]
+member_cells_valid <- member_cells\link{valid_indices}
+}
+
+\section{Process each member cell}{
+
+}
+
+\section{Aggregate results in chunks to avoid memory issues}{
+
+}
+
+\keyword{internal}

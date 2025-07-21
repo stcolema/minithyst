@@ -2,10 +2,18 @@
 % Please edit documentation in R/dmr_analysis.R
 \name{calculate_pct_matrix}
 \alias{calculate_pct_matrix}
-\title{Calculate percentage methylation matrix}
+\title{Calculate percentage methylation matrix (FIXED)}
 \usage{
 calculate_pct_matrix(count_matrix, groups)
 }
+\arguments{
+\item{count_matrix}{data.table with count data}
+
+\item{groups}{character vector of group names}
+}
+\value{
+data.table with percentage methylation
+}
 \description{
-Calculate percentage methylation matrix
+Calculate percentage methylation matrix (FIXED)
 }
