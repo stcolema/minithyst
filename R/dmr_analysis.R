@@ -77,7 +77,7 @@ index_chromosomes <- function(h5_paths, type = "CG", chr_list = NULL, threads = 
   return(chr_index)
 }
 
-#' Calculate smoothed methylation windows
+#' Calculate smoothed methylation windows (Exact Amethyst Replication)
 #' 
 #' @param h5_paths data.table with columns: barcode, path
 #' @param chr_index List of chromosome indices from index_chromosomes
@@ -88,8 +88,9 @@ index_chromosomes <- function(h5_paths, type = "CG", chr_list = NULL, threads = 
 #' @param group_by Character, column name in metadata for grouping
 #' @param genome Character, genome build for chromosome sizes
 #' @param threads Integer, number of threads
+#' @param chrList Optional character vector of chromosomes to process
+#' @param chrSizes Optional numeric vector of chromosome sizes (must match chrList)
 #' @return List with sum_matrix and pct_matrix
-#' @export
 calc_smoothed_windows <- function(h5_paths, 
                                   chr_index,
                                   metadata,
@@ -98,119 +99,273 @@ calc_smoothed_windows <- function(h5_paths,
                                   smooth = 3,
                                   group_by = "cluster_id",
                                   genome = "hg38",
-                                  threads = 1) {
+                                  threads = 1,
+                                  chrList = NULL,
+                                  chrSizes = NULL) {
   
-  # Configure threading
-  old_threads <- data.table::getDTthreads()
-  data.table::setDTthreads(threads)
-  on.exit(data.table::setDTthreads(old_threads))
+  # Configure threading (amethyst approach)
+  old_threads <- getDTthreads()
+  setDTthreads(1)  # Keep data.table single-threaded
+  on.exit(setDTthreads(old_threads))
   
-  # Get chromosome sizes
-  chr_sizes <- get_chromosome_sizes(genome)
+  # Validate inputs (following amethyst)
+  if (!is.null(chrList) && is.null(chrSizes)) {
+    stop("If a chromosome whitelist is used, you must provide matched chromosome sizes.")
+  }
   
-  # Generate genomic windows
-  windows <- generate_genomic_windows(chr_sizes, step)
+  # STEP 1: Generate complete genomic windows (exactly like amethyst)
+  generate_windows <- function(chromosome, size) {
+    starts <- seq(0, size - 1, by = step)
+    ends <- pmin(starts + step, size)
+    data.frame(chr = chromosome, start = starts, end = ends)
+  }
   
-  # Get groups from metadata
-  groups <- unique(metadata[[group_by]])
+  # Get genome definitions (exactly like amethyst)
+  if (is.null(chrList)) {
+    if (genome %in% c("hg19", "hg38")) {
+      chromosome <- c("chr1", "chr2", "chr3", "chr4", "chr5", "chr6", "chr7", "chr8", "chr9", "chr10",
+                      "chr11", "chr12", "chr13", "chr14", "chr15", "chr16", "chr17", "chr18", "chr19",
+                      "chr20", "chr21", "chr22", "chrX", "chrY")
+      if (genome == "hg19") {
+        size <- c(249250621, 243199373, 198022430, 191154276, 180915260, 171115067, 159138663, 146364022, 141213431,
+                  135534747, 135006516, 133851895, 115169878, 107349540, 102531392, 90354753, 81195210, 78077248,
+                  59128983, 63025520, 48129895, 51304566, 155270560, 59373566)
+      } else if (genome == "hg38") {
+        size <- c(248956422, 242193529, 198295559, 190214555, 181538259, 170805979, 159345973, 145138636,
+                  138394717, 133797422, 135086622, 133275309, 114364328, 107043718, 101991189, 90338345,
+                  83257441, 80373285, 58617616, 64444167, 46709983, 50818468, 156040895, 57227415)
+      }
+    } else if (genome %in% c("mm10", "mm39")) {
+      chromosome <- c("chr1", "chr2", "chr3", "chr4", "chr5", "chr6", "chr7", "chr8", "chr9", "chr10",
+                      "chr11", "chr12", "chr13", "chr14", "chr15", "chr16", "chr17", "chr18", "chr19",
+                      "chrX", "chrY")
+      if (genome == "mm10") {
+        size <- c(195471971, 182113224, 160039680, 156508116, 151834684, 149736546, 145441459, 129401213,
+                  124595110, 130694993, 122082543, 120129022, 120421639, 124902244, 104043685, 98207768,
+                  94987271, 90702639, 61431566, 171031299, 91744698)
+      } else if (genome == "mm39") {
+        size <- c(195154279, 181755017, 159745316, 156860686, 151758149, 149588044, 144995196, 130127694,
+                  124359700, 130530862, 121973369, 120092757, 120883175, 125139656, 104073951, 98008968,
+                  95294699, 90720763, 61420004, 169476592, 91455967)
+      }
+    } else {
+      stop("Only hg19, hg38, mm10, or mm39 can be accommodated at this time.")
+    }
+    chromosome_sizes <- data.frame(chromosome, size)
+  } else {
+    chromosome_sizes <- data.frame(chromosome = chrList, size = chrSizes)
+  }
+  
+  # Filter to available chromosomes
+  available_chrs <- intersect(chromosome_sizes$chromosome, names(chr_index))
+  chromosome_sizes <- chromosome_sizes[chromosome_sizes$chromosome %in% available_chrs, ]
+  
+  # Generate complete genomic window grid (exactly like amethyst)
+  genomechunks <- do.call(rbind, lapply(1:nrow(chromosome_sizes), function(i) {
+    generate_windows(chromosome_sizes$chromosome[i], chromosome_sizes$size[i])
+  }))
+  
+  setDT(genomechunks)
+  genomechunks[, window := paste0(chr, "_", start, "_", end)]
+  setkey(genomechunks, chr, start, end)
+  
+  cat(sprintf("Generated %d genomic windows\n", nrow(genomechunks)))
+  
+  # STEP 2: Get groups and chromosome lists (exactly like amethyst)
+  # Create membership data.frame with proper rownames like amethyst expects
+  membership <- data.frame(membership = metadata[[group_by]])
+  rownames(membership) <- metadata$cell_id
+  groups <- as.list(unique(membership$membership))
   groups <- groups[!is.na(groups)]
   
-  # Process by chromosome
-  results_by_chr <- lapply(names(chr_index), function(chr_name) {
-    
-    # Get indices for this chromosome
-    chr_indices <- chr_index[[chr_name]]
-    
-    # Initialize group results
-    group_results <- lapply(groups, function(grp) {
-      
-      # Get member cells
-      member_cells <- metadata[get(group_by) == grp, cell_id]
-      member_indices <- chr_indices[cell_id %in% member_cells]
-      
-      if (nrow(member_indices) == 0) return(NULL)
-      
-      # Read and aggregate data for all members
-      member_data <- data.table::rbindlist(lapply(seq_len(nrow(member_indices)), function(i) {
-        idx <- member_indices[i]
-        path <- h5_paths[barcode == idx$cell_id, path]
-        
-        tryCatch({
-          # Read h5 data
-          data_path <- paste0(type, "/", idx$cell_id, "/1")
-          h5_data <- rhdf5::h5read(path, name = data_path)
-          
-          # Convert to data.table
-          if (!data.table::is.data.table(h5_data)) {
-            h5_data <- data.table::as.data.table(h5_data)
-          }
-          
-          # Filter to this chromosome
-          h5_data <- h5_data[chr == chr_name]
-          
-          if (nrow(h5_data) == 0) return(NULL)
-          
-          # Assign to windows
-          h5_data[, window := paste0(chr, "_", 
-                                     (pos %/% step) * step, "_",
-                                     ((pos %/% step) + 1) * step)]
-          
-          # Aggregate by window
-          window_summary <- h5_data[, .(
-            c = sum(c, na.rm = TRUE), 
-            t = sum(t, na.rm = TRUE)
-          ), by = window]
-          
-          return(window_summary)
-          
-        }, error = function(e) {
-          warning(sprintf("Error reading %s: %s", idx$cell_id, e$message))
-          return(NULL)
-        })
-      }))
-      
-      if (is.null(member_data) || nrow(member_data) == 0) return(NULL)
-      
-      # Aggregate across all members
-      result <- member_data[, .(c = sum(c), t = sum(t)), by = window]
-      data.table::setnames(result, c("window", paste0(grp, "_c"), paste0(grp, "_t")))
-      
-      return(result)
-    })
-    
-    # Merge group results
-    merged_result <- Reduce(function(x, y) {
-      if (is.null(x)) return(y)
-      if (is.null(y)) return(x)
-      merge(x, y, by = "window", all = TRUE)
-    }, group_results)
-    
-    return(merged_result)
-  })
+  chr_groups <- as.list(unique(genomechunks$chr))
   
-  # Combine chromosomes
-  count_matrix <- data.table::rbindlist(results_by_chr, fill = TRUE)
-  
-  # Check if we got any data
-  if (nrow(count_matrix) == 0) {
-    stop("No data found. Check that H5 files contain data for the specified chromosomes.")
+  # STEP 3: Set up parallel processing (exactly like amethyst)
+  if (threads > 1) {
+    future::plan(future::multicore, workers = threads)
   }
   
-  # Replace NA values with 0 in count columns
+  # STEP 4: Process by chromosome (exactly like amethyst approach)
+  by_chr <- list()
+  
+  for (chr in chr_groups) {
+    cat("Processing", chr, "\n")
+    
+    # Get chromosome index (exactly like amethyst)
+    sites <- chr_index[[chr]]
+    
+    # Process groups in parallel (exactly like amethyst)
+    chr_group_results <- furrr::future_map(.x = groups, .f = function(gr) {
+      
+      # Get member cells (exactly like amethyst)
+      member_cells <- rownames(membership[membership$membership == gr, , drop = FALSE])
+      
+      # Get paths for member cells
+      member_paths <- h5_paths[barcode %in% member_cells, path]
+      member_barcodes <- h5_paths[barcode %in% member_cells, barcode]
+      
+      # Process each member cell (exactly like amethyst)
+      member_results <- furrr::future_pmap(.l = list(member_paths, member_barcodes), 
+                                           .f = function(path, barcode) {
+                                             tryCatch({
+                                               # Get site info for this cell and chromosome
+                                               cell_sites <- sites[cell_id == barcode]
+                                               
+                                               if (nrow(cell_sites) == 0) {
+                                                 return(data.table(window = character(0), c = integer(0), t = integer(0)))
+                                               }
+                                               
+                                               # Read H5 data (exactly like amethyst)
+                                               data <- data.table(h5read(path, name = paste0(type, "/", barcode, "/1"),
+                                                                         start = cell_sites$start,
+                                                                         count = cell_sites$count))
+                                               
+                                               # Apply amethyst's exact window assignment logic
+                                               data[pos %% step == 0, pos := pos + 1L]
+                                               data[, window := paste0(chr, "_", 
+                                                                       plyr::round_any(pos, step, floor), "_",
+                                                                       plyr::round_any(pos, step, ceiling))]
+                                               data[, c("chr", "pos", "pct") := NULL]
+                                               
+                                               # Aggregate by window
+                                               data[, .(c = sum(c, na.rm = TRUE), t = sum(t, na.rm = TRUE)), by = window]
+                                               
+                                             }, error = function(e) {
+                                               warning(sprintf("Error processing %s %s: %s", chr, barcode, e$message))
+                                               return(data.table(window = character(0), c = integer(0), t = integer(0)))
+                                             })
+                                           }, .progress = TRUE)
+      
+      # STEP 5: Aggregate in chunks (exactly like amethyst)
+      member_results <- split(member_results, ceiling(seq_along(member_results) / 100))
+      member_results <- lapply(member_results, function(chunk) {
+        chunk <- rbindlist(chunk, fill = TRUE)
+        if (nrow(chunk) > 0) {
+          chunk[, .(c = sum(c, na.rm = TRUE), t = sum(t, na.rm = TRUE)), by = window]
+        } else {
+          data.table(window = character(0), c = integer(0), t = integer(0))
+        }
+      })
+      
+      member_results <- rbindlist(member_results, fill = TRUE)
+      
+      if (nrow(member_results) > 0) {
+        member_results <- member_results[, .(c = sum(c, na.rm = TRUE), t = sum(t, na.rm = TRUE)), by = window]
+        setnames(member_results, c("window", paste0(gr, "_c"), paste0(gr, "_t")))
+      } else {
+        member_results <- data.table(window = character(0))
+        member_results[, paste0(gr, "_c") := integer(0)]
+        member_results[, paste0(gr, "_t") := integer(0)]
+      }
+      
+      return(member_results)
+      
+    }, .progress = TRUE)
+    
+    # Merge group results for this chromosome (exactly like amethyst)
+    by_chr[[chr]] <- Reduce(function(x, y) merge(x, y, by = "window", all = TRUE, sort = FALSE), 
+                            chr_group_results)
+    
+    cat("Completed", chr, "\n")
+  }
+  
+  # STEP 6: Reset threading and combine results (exactly like amethyst)
+  if (threads > 1) {
+    future::plan(future::sequential)
+    gc()
+  }
+  
+  count_matrix <- rbindlist(by_chr, fill = TRUE)
+  
+  # STEP 7: Join with genomic chunks (exactly like amethyst)
+  count_matrix <- merge(genomechunks, count_matrix, by = "window", all.x = TRUE, sort = FALSE)
+  
+  # STEP 8: Apply smoothing (exactly like amethyst)
+  count_matrix[, window := NULL]
+  setorder(count_matrix, chr, start)
+  
+  # Calculate rolling sums (exactly like amethyst)
   count_cols <- grep("_c$|_t$", names(count_matrix), value = TRUE)
-  for (col in count_cols) {
-    count_matrix[is.na(get(col)), (col) := 0]
+  rolling_sums <- count_matrix[, lapply(.SD, function(x) 
+    as.integer(frollsum(x, n = smooth, align = "center", fill = NA, na.rm = TRUE))), 
+    .SDcols = count_cols]
+  
+  # Calculate smoothed boundaries (exactly like amethyst)
+  count_matrix[, smooth_start := lapply(.SD, function(x) 
+    frollapply(x, n = smooth, FUN = function(y) y[1], align = "center", fill = NA)), 
+    .SDcols = "start"]
+  count_matrix[, smooth_end := lapply(.SD, function(x) 
+    frollapply(x, n = smooth, FUN = function(y) y[smooth], align = "center", fill = NA)), 
+    .SDcols = "end"]
+  
+  # Replace with smoothed values (exactly like amethyst)
+  count_matrix[, names(rolling_sums) := rolling_sums]
+  
+  # Apply amethyst's exact edge filtering
+  count_matrix <- count_matrix[shift(chr, 1) == shift(chr, -2)]
+  
+  # Clean up (exactly like amethyst)
+  count_matrix[, c("smooth_start", "smooth_end") := NULL]
+  count_matrix <- count_matrix[rowSums(count_matrix[, .SD, .SDcols = -c("chr", "start", "end")], na.rm = TRUE) > 0]
+  
+  cat(sprintf("Final count matrix: %d windows\n", nrow(count_matrix)))
+  
+  # STEP 9: Calculate percentage matrix (exactly like amethyst)
+  pct_matrix <- copy(count_matrix)
+  
+  for (gr in groups) {
+    c_col <- paste0(gr, "_c")
+    t_col <- paste0(gr, "_t")
+    
+    if (c_col %in% names(pct_matrix) && t_col %in% names(pct_matrix)) {
+      # Exactly like amethyst calculation
+      pct_matrix[, m := round(pct_matrix[[c_col]] * 100 / 
+                                (pct_matrix[[c_col]] + pct_matrix[[t_col]]), 2)]
+      setnames(pct_matrix, "m", as.character(gr))
+    }
   }
   
-  # Apply smoothing
-  if (smooth > 1) {
-    count_matrix <- apply_smoothing(count_matrix, smooth, step)
+  # Remove count columns (exactly like amethyst)
+  pct_matrix[, (paste0(groups, "_c")) := NULL]
+  pct_matrix[, (paste0(groups, "_t")) := NULL]
+  
+  cat(sprintf("Final percentage matrix: %d windows\n", nrow(pct_matrix)))
+  
+  return(list(sum_matrix = count_matrix, pct_matrix = pct_matrix))
+}
+
+# Helper function for plyr dependency
+if (!requireNamespace("plyr", quietly = TRUE)) {
+  round_any <- function(x, accuracy, f = round) {
+    f(x / accuracy) * accuracy
   }
-  
-  # Calculate percentage matrix
-  pct_matrix <- calculate_pct_matrix(count_matrix, groups)
-  
-  list(sum_matrix = count_matrix, pct_matrix = pct_matrix)
+} else {
+  round_any <- plyr::round_any
+}
+
+#' Helper function to get chromosome sizes
+get_chromosome_sizes <- function(genome) {
+  if (genome == "hg38") {
+    data.table(
+      chr = c("chr1", "chr2", "chr3", "chr4", "chr5", "chr6", "chr7", "chr8", "chr9", "chr10",
+              "chr11", "chr12", "chr13", "chr14", "chr15", "chr16", "chr17", "chr18", "chr19",
+              "chr20", "chr21", "chr22", "chrX", "chrY"),
+      size = c(248956422, 242193529, 198295559, 190214555, 181538259, 170805979, 159345973, 145138636,
+               138394717, 133797422, 135086622, 133275309, 114364328, 107043718, 101991189, 90338345,
+               83257441, 80373285, 58617616, 64444167, 46709983, 50818468, 156040895, 57227415)
+    )
+  } else if (genome == "hg19") {
+    data.table(
+      chr = c("chr1", "chr2", "chr3", "chr4", "chr5", "chr6", "chr7", "chr8", "chr9", "chr10",
+              "chr11", "chr12", "chr13", "chr14", "chr15", "chr16", "chr17", "chr18", "chr19",
+              "chr20", "chr21", "chr22", "chrX", "chrY"),
+      size = c(249250621, 243199373, 198022430, 191154276, 180915260, 171115067, 159138663, 146364022, 141213431,
+               135534747, 135006516, 133851895, 115169878, 107349540, 102531392, 90354753, 81195210, 78077248,
+               59128983, 63025520, 48129895, 51304566, 155270560, 59373566)
+    )
+  } else {
+    stop("Only hg19 and hg38 supported. Use 'hg38', 'hg19', 'mm10', or 'mm39'")
+  }
 }
 
 #' Test for differentially methylated regions
@@ -568,29 +723,28 @@ apply_smoothing <- function(count_matrix, smooth, step) {
   return(count_matrix)
 }
 
-#' Calculate percentage methylation matrix
-#' @keywords internal
+
+#' Calculate percentage methylation matrix (FIXED)
+#' 
+#' @param count_matrix data.table with count data
+#' @param groups character vector of group names  
+#' @return data.table with percentage methylation
 calculate_pct_matrix <- function(count_matrix, groups) {
-  pct_matrix <- data.table::copy(count_matrix)
+  pct_matrix <- copy(count_matrix)
   
+  # FIXED: Calculate all percentages first, then remove count columns
   for (grp in groups) {
     c_col <- paste0(grp, "_c")
     t_col <- paste0(grp, "_t")
     
     if (c_col %in% names(pct_matrix) && t_col %in% names(pct_matrix)) {
-      # Calculate percentage
-      total <- pct_matrix[[c_col]] + pct_matrix[[t_col]]
-      pct_val <- ifelse(total > 0, 
-                        round(100 * pct_matrix[[c_col]] / total, 2),
-                        NA_real_)
-      
-      # Add percentage column
-      pct_matrix[, (grp) := pct_val]
-      
-      # Remove count columns
-      pct_matrix[, c(c_col, t_col) := NULL]
+      pct_matrix[, (grp) := round(100 * get(c_col) / (get(c_col) + get(t_col)), 2)]
     }
   }
+  
+  # Remove count columns AFTER all calculations are done
+  count_cols <- grep("_c$|_t$", names(pct_matrix), value = TRUE)
+  pct_matrix[, (count_cols) := NULL]
   
   return(pct_matrix)
 }
