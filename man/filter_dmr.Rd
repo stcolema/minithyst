@@ -2,7 +2,7 @@
 % Please edit documentation in R/dmr_analysis.R
 \name{filter_dmr}
 \alias{filter_dmr}
-\title{Filter and reshape DMR results}
+\title{Filter DMRs}
 \usage{
 filter_dmr(
   dmr_matrix,
@@ -27,5 +27,6 @@ filter_dmr(
 data.table with filtered results
 }
 \description{
-Filter and reshape DMR results
+Filter DMR results based on multiple testing correction and
+log-fold change threshold
 }

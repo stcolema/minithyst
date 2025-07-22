@@ -2,7 +2,7 @@
 % Please edit documentation in R/dmr_analysis.R
 \name{test_dmr}
 \alias{test_dmr}
-\title{Test for differentially methylated regions}
+\title{Test Differentially Methlated Regions}
 \usage{
 test_dmr(sum_matrix, comparisons = NULL, min_total = 3, min_group = 3)
 }

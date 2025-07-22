@@ -2,7 +2,7 @@
 % Please edit documentation in R/dmr_analysis.R
 \name{collapse_dmr}
 \alias{collapse_dmr}
-\title{Collapse adjacent DMRs}
+\title{Collapse DMRs}
 \usage{
 collapse_dmr(dmr_filtered, max_gap = 0, min_length = 1000)
 }
@@ -17,5 +17,5 @@ collapse_dmr(dmr_filtered, max_gap = 0, min_length = 1000)
 data.table with collapsed DMRs
 }
 \description{
-Collapse adjacent DMRs
+Collapse adjacent DMRs into a single entity
 }

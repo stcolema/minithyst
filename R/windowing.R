@@ -1,8 +1,8 @@
 # windowing.R - Smoothed window calculation functions for minithyst package
 
-#' Calculate smoothed methylation windows
+#' @title Calculate smoothed methylation windows
 #' 
-#' Aggregates methylation data into genomic windows and applies kernel smoothing
+#' @description Aggregates methylation data into genomic windows and applies kernel smoothing
 #' to reduce sparsity. Cells are pooled within groups before smoothing.
 #' 
 #' @param h5_paths data.table with columns: barcode, path
