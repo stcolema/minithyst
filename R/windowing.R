@@ -117,10 +117,12 @@ calc_smoothed_windows <- function(h5_paths,
     step = step
   )
   
-  count_matrix <- reduce_to_real_columns(count_matrix)
+  # count_matrix <- reduce_to_real_columns(count_matrix)
   
   # Merge with genomic windows
   count_matrix <- merge_with_windows(genomechunks, count_matrix)
+  
+  count_matrix[, window := NULL]
   
   # Apply kernel smoothing
   count_matrix <- apply_kernel_smoothing(
@@ -149,6 +151,7 @@ calc_smoothed_windows <- function(h5_paths,
   }
 }
 
+
 #' Process data using optimized index
 #' @keywords internal
 process_with_optimized_index <- function(index, metadata, groups, group_by, step) {
@@ -170,75 +173,91 @@ process_with_optimized_index <- function(index, metadata, groups, group_by, step
   message(sprintf("Found %d chromosomes: %s", length(all_chr), 
                   paste(head(all_chr, 5), collapse = ", ")))
   
-  # Process each group-chromosome combination
-  process_group_chr <- function(gr, chr) {
-    # Get member cells
-    member_cells <- metadata[get(group_by) == gr, cell_id]
-    if (length(member_cells) == 0) return(NULL)
+  # Process each chromosome separately to avoid duplicate column names
+  process_chromosome <- function(chr) {
+    chr_results <- list()
     
-    # Find cells in index
-    cells_in_index <- intersect(member_cells, names(index$cell_index))
-    if (length(cells_in_index) == 0) return(NULL)
+    for (gr in groups) {
+      # Get member cells
+      member_cells <- metadata[get(group_by) == gr, cell_id]
+      if (length(member_cells) == 0) next
+      
+      # Find cells in index
+      cells_in_index <- intersect(member_cells, names(index$cell_index))
+      if (length(cells_in_index) == 0) next
+      
+      # Check which cells have data for this chromosome
+      cells_with_chr <- sapply(cells_in_index, function(cell) {
+        cell_info <- index$cell_index[[cell]]
+        if (!is.null(cell_info$summary) && nrow(cell_info$summary) > 0) {
+          chr %in% cell_info$summary$chr
+        } else {
+          FALSE
+        }
+      })
+      
+      cells_to_process <- cells_in_index[cells_with_chr]
+      if (length(cells_to_process) == 0) next
+      
+      # Read data using optimized index
+      group_data <- read_with_index(index, cells_to_process, chr)
+      if (is.null(group_data) || nrow(group_data) == 0) next
+      
+      # Window assignment
+      group_data[pos %% step == 0, pos := pos + 1L]
+      group_data[, window := paste0(chr, "_", 
+                                    round_any(pos, step, floor), "_",
+                                    round_any(pos, step, ceiling))]
+      
+      # Aggregate
+      result <- group_data[, .(c = sum(c, na.rm = TRUE), 
+                               t = sum(t, na.rm = TRUE)), 
+                           by = window]
+      
+      # Use consistent column naming that won't conflict
+      data.table::setnames(result, c("window", paste0(gr, "_c"), paste0(gr, "_t")))
+      chr_results[[as.character(gr)]] <- result
+    }
     
-    # Check which cells have data for this chromosome
-    cells_with_chr <- sapply(cells_in_index, function(cell) {
-      cell_info <- index$cell_index[[cell]]
-      if (!is.null(cell_info$summary) && nrow(cell_info$summary) > 0) {
-        chr %in% cell_info$summary$chr
-      } else {
-        FALSE
-      }
-    })
+    if (length(chr_results) == 0) return(NULL)
     
-    cells_to_process <- cells_in_index[cells_with_chr]
-    if (length(cells_to_process) == 0) return(NULL)
+    # Merge all groups for this chromosome
+    chr_merged <- Reduce(function(x, y) {
+      merge(x, y, by = "window", all = TRUE)
+    }, chr_results)
     
-    # Read data using optimized index
-    group_data <- read_with_index(index, cells_to_process, chr)
-    if (is.null(group_data) || nrow(group_data) == 0) return(NULL)
-    
-    # Window assignment
-    group_data[pos %% step == 0, pos := pos + 1L]
-    group_data[, window := paste0(chr, "_", 
-                                  round_any(pos, step, floor), "_",
-                                  round_any(pos, step, ceiling))]
-    
-    # Aggregate
-    result <- group_data[, .(c = sum(c, na.rm = TRUE), 
-                             t = sum(t, na.rm = TRUE)), 
-                         by = window]
-    
-    data.table::setnames(result, c("window", paste0(gr, "_c"), paste0(gr, "_t")))
-    return(result)
+    return(chr_merged)
   }
   
-  # Process all combinations
-  all_results <- list()
-  pb <- utils::txtProgressBar(max = length(all_chr) * length(groups), style = 3)
-  counter <- 0
+  # Process all chromosomes
+  all_chr_results <- list()
+  pb <- utils::txtProgressBar(max = length(all_chr), style = 3)
   
-  for (chr in all_chr) {
-    for (gr in groups) {
-      counter <- counter + 1
-      utils::setTxtProgressBar(pb, counter)
-      
-      result <- process_group_chr(gr, chr)
-      if (!is.null(result) && nrow(result) > 0) {
-        result_key <- paste0(chr, "_", gr)
-        all_results[[result_key]] <- result
-      }
+  for (i in seq_along(all_chr)) {
+    chr <- all_chr[i]
+    utils::setTxtProgressBar(pb, i)
+    
+    chr_result <- process_chromosome(chr)
+    if (!is.null(chr_result) && nrow(chr_result) > 0) {
+      all_chr_results[[chr]] <- chr_result
     }
   }
   close(pb)
   
-  if (length(all_results) == 0) {
+  if (length(all_chr_results) == 0) {
     stop("No data was successfully processed")
   }
   
-  # Merge all results
-  count_matrix <- Reduce(function(x, y) {
-    merge(x, y, by = "window", all = TRUE)
-  }, all_results)
+  # Merge results across chromosomes
+  # Since we're now merging by window name (which includes chromosome),
+  # there should be no overlapping window names between chromosomes
+  count_matrix <- data.table::rbindlist(all_chr_results, fill = TRUE)
+  
+  # Fill NAs with 0 for missing group-window combinations
+  group_cols <- grep("_(c|t)$", names(count_matrix), value = TRUE)
+  for (col in group_cols) {
+    count_matrix[is.na(get(col)), (col) := 0]
+  }
   
   return(count_matrix)
 }
@@ -288,7 +307,6 @@ merge_with_windows <- function(genomechunks, count_matrix) {
 #' @keywords internal
 apply_kernel_smoothing <- function(count_matrix, smooth, kernel, kernel_weights) {
   
-  count_matrix[, window := NULL]
   data.table::setorder(count_matrix, chr, start)
   
   # Get count columns
