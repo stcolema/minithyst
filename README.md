@@ -6,6 +6,32 @@ An R package for identifying differentially methylated regions (DMRs) from singl
 
 minithyst provides functions for DMR analysis using a window-based approach with Fisher's exact tests.
 
+## 📖 Citation
+
+If you use `minithyst` in your work, please cite:
+
+> Lauren E. Rylaarsdam, Ruth V. Nichols, Brendan L. O’Connell, Stephen Coleman, Galip Gürkan Yardımcı, Andrew C. Adey.  
+> *Single-cell DNA methylation analysis tool Amethyst reveals distinct noncanonical methylation patterns in human glial cells.*  
+> bioRxiv 2024.08.13.607670. [https://doi.org/10.1101/2024.08.13.607670](https://doi.org/10.1101/2024.08.13.607670)
+
+**BibTeX:**
+
+```bibtex
+@article {Rylaarsdam2024.08.13.607670,
+	author = {Rylaarsdam, Lauren E. and Nichols, Ruth V. and O{\textquoteright}Connell, Brendan L. and Coleman, Stephen and Yard{\i}mc{\i}, Galip G{\"u}rkan and Adey, Andrew C.},
+	title = {Single-cell DNA methylation analysis tool Amethyst reveals distinct noncanonical methylation patterns in human glial cells},
+	elocation-id = {2024.08.13.607670},
+	year = {2024},
+	doi = {10.1101/2024.08.13.607670},
+	publisher = {Cold Spring Harbor Laboratory},
+	abstract = {Single-cell sequencing technologies have revolutionized biomedical research by enabling deconvolution of cell type-specific properties in highly heterogeneous tissue. While robust tools have been developed to handle bioinformatic challenges posed by single-cell RNA and ATAC data, options for emergent modalities such as methylation are much more limited, impeding the utility of results. Here we present Amethyst, a comprehensive R package for atlas-scale single-cell methylation sequencing data analysis. Amethyst begins with base-level methylation calls and expedites batch integration, doublet detection, dimensionality reduction, clustering, cell type annotation, differentially methylated region calling, and interpretation of results, facilitating rapid data interaction in a local environment. We introduce the workflow using published single-cell methylation human peripheral blood mononuclear cell (PBMC) and human cortex data. We further leverage Amethyst on an atlas-scale brain dataset to describe a noncanonical methylation pattern in human astrocytes and oligodendrocytes, challenging the notion that this form of methylation is principally relevant to neurons in the brain. Tools such as Amethyst will increase accessibility to single-cell methylation data analysis, catalyzing research progress across diverse contexts.Competing Interest StatementA.C.A. is an author of one or more patents that pertain to sciMET technology and an advisor to Scale Biosciences who have commercialized the technology. This potential conflict is managed by the office of research integrity at OHSU.},
+	URL = {https://www.biorxiv.org/content/early/2024/09/03/2024.08.13.607670},
+	eprint = {https://www.biorxiv.org/content/early/2024/09/03/2024.08.13.607670.full.pdf},
+	journal = {bioRxiv}
+}
+
+`minithyst` was built to produce identical final results to `amethyst` and this is where all benchmarking and tests were performed.
+
 ## Method
 
 ### Approach
