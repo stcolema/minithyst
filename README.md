@@ -6,7 +6,7 @@ An R package for identifying differentially methylated regions (DMRs) from singl
 
 minithyst provides functions for DMR analysis using a window-based approach with Fisher's exact tests.
 
-## 📖 Citation
+## Citation
 
 If you use `minithyst` in your work, please cite:
 
@@ -29,6 +29,7 @@ If you use `minithyst` in your work, please cite:
 	eprint = {https://www.biorxiv.org/content/early/2024/09/03/2024.08.13.607670.full.pdf},
 	journal = {bioRxiv}
 }
+```
 
 `minithyst` was built to produce identical final results to `amethyst` and this is where all benchmarking and tests were performed.
 
