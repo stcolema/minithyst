@@ -1,10 +1,10 @@
 # minithyst
 
-An R package for identifying differentially methylated regions (DMRs) from single-cell methylation data. This package implements a subset of DMR analysis functionality, focusing on window-based statistical testing.
+An R package for identifying differentially methylated regions (DMRs) from single-cell methylation data. This package implements a subset of the `amethyst` package's functionality, focusing on DMR analysis.
 
 ## Overview
 
-minithyst provides functions for DMR analysis using a window-based approach with Fisher's exact tests. The implementation is intended for exploratory analysis and may require validation for specific research applications.
+minithyst provides functions for DMR analysis using a window-based approach with Fisher's exact tests.
 
 ## Method
 
